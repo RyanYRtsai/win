@@ -112,12 +112,12 @@
   </div>
 
   <script>
-    // ====== Finnhub 設定 ======
-    const FINNHUB_KEY = 'd2eu7j1r01qmrq4orkjgd2eu7j1r01qmrq4orkk0';
+    // ====== Finnhub 設定（使用你的新 Key） ======
+    const FINNHUB_KEY = 'd2ev6o9r01qmrq4p164gd2ev6o9r01qmrq4p1650';
     const FH_BASE = 'https://finnhub.io/api/v1';
     const WS_URL = `wss://ws.finnhub.io?token=${encodeURIComponent(FINNHUB_KEY)}`;
 
-    // REST 請求（少量、含快取）
+    // REST 請求（含快取）
     const LS_PREFIX = 'tqqq_fh_';
     function cacheGet(k){try{const r=localStorage.getItem(LS_PREFIX+k);if(!r)return null;const o=JSON.parse(r);if(o.exp && Date.now()>o.exp){localStorage.removeItem(LS_PREFIX+k);return null}return o.val}catch{return null}}
     function cacheSet(k,v,ttl){localStorage.setItem(LS_PREFIX+k,JSON.stringify({val:v,exp:ttl?Date.now()+ttl:0}))}
@@ -159,23 +159,21 @@
       const url = `${FH_BASE}/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${to}&token=${encodeURIComponent(FINNHUB_KEY)}`;
       const j = await fetchJSON(url, `candle_${symbol}`, 24*60*60*1000);
       if(j.s!=='ok') throw new Error('No candle data: '+symbol);
-      // Finnhub 回傳: t(unixt), c(收), o,h,l,v
       const dates = j.t.map(ts => new Date(ts*1000).toISOString().slice(0,10));
       const closes = j.c;
       return {dates, closes};
     }
 
-    // ====== 取快照報價：/quote（只為了前收 & 初始 % 變化） ======
+    // ====== 取快照報價：/quote（為了前收 & 初始 % 變化） ======
     async function getQuote(symbol){
       const url = `${FH_BASE}/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(FINNHUB_KEY)}`;
       const j = await fetchJSON(url, `quote_${symbol}`, 10*60*1000); // 10 分鐘快取
-      // 回傳: c=現價, dp=變化%, pc=前收, t=時間
       return { price:j.c||0, changePct:j.dp||0, prevClose:j.pc||0, ts:j.t? new Date(j.t*1000): new Date() };
     }
 
     // ====== WebSocket 即時訂閱 ======
     let ws=null, wsTimer=null, wsBackoff=2000, wsHealthy=false;
-    const subs = new Set(['QQQ','TQQQ']); // 需要的即時標的
+    const subs = new Set(['QQQ','TQQQ']);
     const lastPrice = { QQQ: null, TQQQ: null, VIXY: null };
     const prevClose = { QQQ: null, TQQQ: null, VIXY: null };
 
@@ -211,7 +209,6 @@
               if(s==='TQQQ') updateLiveQuoteUI('TQQQ', p);
             }
           });
-          // 更新時間戳
           document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
         }
       };
@@ -237,7 +234,7 @@
           updateLiveQuoteUI('TQQQ', q2.price, q2.prevClose);
           document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
         }catch(e){ /* 靜默失敗 */ }
-      }, 60*1000); // 每 1 分鐘
+      }, 60*1000);
     }
     function stopPollFallback(){
       if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
@@ -269,18 +266,15 @@
     let chartInstance=null;
 
     async function fetchMarketData(){
-      // 先抓 quote 拿 prevClose，便於計算變化 %
       const [qQQQ, qTQQQ, qVIXY] = await Promise.all([ getQuote('QQQ'), getQuote('TQQQ'), getQuote('VIXY') ]);
       prevClose.QQQ = qQQQ.prevClose; prevClose.TQQQ = qTQQQ.prevClose; prevClose.VIXY = qVIXY.prevClose;
 
-      // 日線
       const [dQQQ, dTQQQ] = await Promise.all([ getDailyCandles('QQQ', 500), getDailyCandles('TQQQ', 500) ]);
 
       const qqqSMA200 = computeSMA(dQQQ.closes, 200);
       const tVol = computeVol(dTQQQ.closes, 20);
       const tRSI = computeRSI(dTQQQ.closes, 14);
 
-      // 近 90 天圖表
       const hist = [];
       const n = Math.min(90, dQQQ.dates.length);
       for(let i=dQQQ.dates.length - n; i<dQQQ.dates.length; i++){
@@ -289,15 +283,12 @@
         hist.push({ date: dQQQ.dates[i], price: dQQQ.closes[i], sma200: sma });
       }
 
-      // 當前價格（先用 quote，之後由 WS 即時覆蓋）
       lastPrice.QQQ = qQQQ.price || dQQQ.closes.at(-1);
       lastPrice.TQQQ = qTQQQ.price || dTQQQ.closes.at(-1);
 
-      // LRS 訊號
       const isAbove = qqqSMA200 ? lastPrice.QQQ > qqqSMA200 : null;
       const distance = qqqSMA200 ? ((lastPrice.QQQ - qqqSMA200)/qqqSMA200*100) : null;
 
-      // 策略統計
       let monthlySignals = 0, holdingCount = 0;
       for(let i=1;i<hist.length;i++){
         const a=hist[i-1], b=hist[i];
@@ -314,7 +305,7 @@
         else break;
       }
 
-      const data = {
+      return {
         lastUpdate: new Date().toLocaleString('zh-TW'),
         qqq:{
           price: (lastPrice.QQQ||0).toFixed(2),
@@ -325,12 +316,12 @@
         },
         tqqq:{
           price: (lastPrice.TQQQ||0).toFixed(2),
-          change: qTQQQ.changePct?.toFixed?.(2) ?? '--',
+          change: (qTQQQ.changePct??0).toFixed(2),
           volatility: tVol? tVol.toFixed(1): '--',
           rsi: tRSI? tRSI.toFixed(0): '--'
         },
         risk:{
-          vix: qVIXY.price? qVIXY.price.toFixed(1): '--', // 以 VIXY 近似
+          vix: qVIXY.price? qVIXY.price.toFixed(1): '--',
           trendStrength: (qqqSMA200 && Math.abs(distance)>5)? '強':'弱',
           drawdownRisk: qVIXY.price? (qVIXY.price>30? '高': qVIXY.price>20? '中':'低'): '--',
           signalStability: monthlySignals<2? '穩定':'不穩定'
@@ -344,14 +335,11 @@
         },
         historicalData: hist
       };
-      return data;
     }
 
     function updateDashboard(data){
-      // Header
       document.getElementById('lastUpdate').textContent = data.lastUpdate;
 
-      // Signal
       const isTQQQ = data.strategy.signal==='TQQQ';
       const signalEl = document.getElementById('signalStatus');
       signalEl.className='signal-status ' + (isTQQQ? 'signal-tqqq':'signal-cash');
@@ -359,33 +347,28 @@
       document.getElementById('signalDescription').textContent = isTQQQ? 'QQQ 收盤 > SMA200，啟用槓桿腿':'QQQ 收盤 ≤ SMA200，轉入現金腿';
       document.getElementById('actionRequired').style.display='none';
 
-      // QQQ
       document.getElementById('qqqPrice').textContent = '$'+data.qqq.price;
       document.getElementById('qqqSma200').textContent = data.qqq.sma200==='--'?'--':('$'+data.qqq.sma200);
       document.getElementById('qqqDistance').textContent = data.qqq.distance==='--'?'--':(data.qqq.distance+'%');
       document.getElementById('qqqChange').textContent = (data.qqq.change||'0')+'%';
       document.getElementById('qqqChange').className = 'metric-value ' + ((parseFloat(data.qqq.change)||0)>=0?'positive':'negative');
 
-      // TQQQ
       document.getElementById('tqqqPrice').textContent = '$'+data.tqqq.price;
       document.getElementById('tqqqChange').textContent = (data.tqqq.change||'0')+'%';
       document.getElementById('tqqqChange').className = 'metric-value ' + ((parseFloat(data.tqqq.change)||0)>=0?'positive':'negative');
       document.getElementById('tqqqVolatility').textContent = data.tqqq.volatility==='--'?'--':(data.tqqq.volatility+'%');
       document.getElementById('tqqqRsi').textContent = data.tqqq.rsi;
 
-      // Risk
       document.getElementById('vixLevel').textContent = data.risk.vix;
       document.getElementById('trendStrength').textContent = data.risk.trendStrength;
       document.getElementById('drawdownRisk').textContent = data.risk.drawdownRisk;
       document.getElementById('signalStability').textContent = data.risk.signalStability;
 
-      // Strategy stats
       document.getElementById('monthlySignals').textContent = data.strategy.monthlySignals+' 次';
       document.getElementById('currentCycleDays').textContent = data.strategy.currentCycleDays+' 天';
       document.getElementById('tqqqHoldingRatio').textContent = data.strategy.holdingRatio+'%';
       document.getElementById('winRate').textContent = data.strategy.winRate;
 
-      // Chart
       const ctx = document.getElementById('priceChart').getContext('2d');
       const labels = data.historicalData.map(d=>d.date);
       const priceSeries = data.historicalData.map(d=>d.price);
@@ -408,16 +391,12 @@
 
     async function initAll(){
       try{
-        // 日線與初始數據
         const data = await fetchMarketData();
         updateDashboard(data);
 
-        // 啟動 WS（若失敗自動啟動輪詢後備）
         openWS();
-        // 監看 WS 健康，若 10 秒內沒有連線成功就啟動後備；若連上則關後備
         setTimeout(()=>{ if(!wsHealthy) startPollFallback(); }, 10000);
-        const wsHealthWatcher = setInterval(()=>{ if(wsHealthy) stopPollFallback(); else startPollFallback(); }, 15000);
-
+        setInterval(()=>{ if(wsHealthy) stopPollFallback(); else startPollFallback(); }, 15000);
       }catch(err){
         console.error(err);
         document.getElementById('loadingIndicator').style.display='none';
@@ -425,7 +404,7 @@
       }
     }
 
-    async function refreshData(){ // 只刷新日線與衍生指標
+    async function refreshData(){
       document.getElementById('loadingIndicator').style.display='block';
       document.getElementById('dashboardContent').style.display='none';
       document.getElementById('chartSection').style.display='none';
@@ -439,10 +418,7 @@
       }
     }
 
-    // 首次載入
     initAll();
-
-    // 視窗回到前景時，刷新一次
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshData(); });
   </script>
 </body>
