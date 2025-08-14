@@ -160,88 +160,91 @@
     <script>
         let chartInstance = null;
         let currentData = null;
+        const API_KEY = 'BAKYJMTPF6SN05W9';
+        const BASE_URL = 'https://www.alphavantage.co/query';
+
+        async function fetchAlphaVantage(functionName, symbol, params = {}) {
+            const urlParams = new URLSearchParams({ function: functionName, symbol, apikey: API_KEY, ...params });
+            const response = await fetch(`${BASE_URL}?${urlParams.toString()}`);
+            if (!response.ok) {
+                throw new Error('API request failed');
+            }
+            return await response.json();
+        }
 
         async function fetchMarketData() {
             try {
-                const symbols = ['QQQ', 'TQQQ', '^VIX'];
                 const data = { qqq: {}, tqqq: {}, risk: {}, strategy: {}, historicalData: [] };
 
-                for (const symbol of symbols) {
-                    const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d&includePrePost=false&events=div%2Csplits`);
-                    const json = await response.json();
-                    const chart = json.chart.result[0];
-                    const closes = chart.indicators.quote[0].close;
-                    const timestamps = chart.timestamp;
-                    const len = closes.length;
-                    const currentPrice = closes[len - 1];
+                // Fetch QQQ quote
+                const qqqQuote = await fetchAlphaVantage('GLOBAL_QUOTE', 'QQQ');
+                const qqqGlobalQuote = qqqQuote['Global Quote'];
+                data.qqq.price = parseFloat(qqqGlobalQuote['05. price']).toFixed(2);
+                data.qqq.change = parseFloat(qqqGlobalQuote['10. change percent'].replace('%', '')).toFixed(2);
 
-                    if (symbol === 'QQQ') {
-                        const sma200 = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
-                        data.qqq.price = currentPrice.toFixed(2);
-                        data.qqq.sma200 = sma200.toFixed(2);
-                        data.qqq.isAboveSma = currentPrice > sma200;
-                        data.qqq.distance = ((currentPrice - sma200) / sma200 * 100).toFixed(2);
-                        data.qqq.change = len > 1 ? ((currentPrice - closes[len - 2]) / closes[len - 2] * 100).toFixed(2) : '0.00';
+                // Fetch QQQ daily time series for closes and SMA calculation
+                const qqqDaily = await fetchAlphaVantage('TIME_SERIES_DAILY', 'QQQ');
+                const timeSeries = qqqDaily['Time Series (Daily)'];
+                const dates = Object.keys(timeSeries).sort((a, b) => new Date(b) - new Date(a)); // Latest first
+                const closes = dates.map(date => parseFloat(timeSeries[date]['4. close']));
 
-                        // Historical data for chart (last 90 days)
-                        const chartDays = 90;
-                        if (len >= 200 + chartDays - 1) {
-                            for (let k = 0; k < chartDays; k++) {
-                                const j = len - chartDays + k;
-                                const smaSlice = closes.slice(j - 199, j + 1);
-                                const sma = smaSlice.reduce((a, b) => a + b, 0) / 200;
-                                data.historicalData.push({
-                                    date: new Date(timestamps[j] * 1000).toISOString().split('T')[0],
-                                    price: closes[j],
-                                    sma200: sma
-                                });
-                            }
-                        }
-                    } else if (symbol === 'TQQQ') {
-                        data.tqqq.price = currentPrice.toFixed(2);
-                        data.tqqq.change = len > 1 ? ((currentPrice - closes[len - 2]) / closes[len - 2] * 100).toFixed(2) : '0.00';
-
-                        // 20-day volatility (annualized historical volatility)
-                        if (len >= 21) {
-                            const last21closes = closes.slice(-21);
-                            const returns = [];
-                            for (let i = 1; i < last21closes.length; i++) {
-                                returns.push((last21closes[i] - last21closes[i - 1]) / last21closes[i - 1]);
-                            }
-                            const meanRet = returns.reduce((a, b) => a + b, 0) / returns.length;
-                            const varRet = returns.reduce((a, b) => a + (b - meanRet) ** 2, 0) / (returns.length - 1);
-                            const std = Math.sqrt(varRet);
-                            data.tqqq.volatility = (std * Math.sqrt(252) * 100).toFixed(1);
-                        } else {
-                            data.tqqq.volatility = '--';
-                        }
-
-                        // RSI 14
-                        const rsiPeriod = 14;
-                        if (len >= rsiPeriod + 1) {
-                            const lastChanges = closes.slice(-(rsiPeriod + 100)).map((c, i) => i > 0 ? c - closes.slice(-(rsiPeriod + 100))[i - 1] : 0);
-                            let avgGain = 0, avgLoss = 0;
-                            for (let i = 1; i <= rsiPeriod; i++) {
-                                const ch = lastChanges[i];
-                                if (ch > 0) avgGain += ch;
-                                else avgLoss -= ch;
-                            }
-                            avgGain /= rsiPeriod;
-                            avgLoss /= rsiPeriod;
-                            for (let i = rsiPeriod + 1; i < lastChanges.length; i++) {
-                                const ch = lastChanges[i];
-                                avgGain = (avgGain * (rsiPeriod - 1) + (ch > 0 ? ch : 0)) / rsiPeriod;
-                                avgLoss = (avgLoss * (rsiPeriod - 1) + (ch < 0 ? -ch : 0)) / rsiPeriod;
-                            }
-                            const rs = avgGain / avgLoss || 0;
-                            data.tqqq.rsi = (100 - 100 / (1 + rs)).toFixed(0);
-                        } else {
-                            data.tqqq.rsi = '--';
-                        }
-                    } else if (symbol === '^VIX') {
-                        data.risk.vix = currentPrice.toFixed(1);
-                    }
+                if (closes.length >= 200) {
+                    const last200Closes = closes.slice(0, 200);
+                    data.qqq.sma200 = (last200Closes.reduce((sum, val) => sum + val, 0) / 200).toFixed(2);
+                } else {
+                    data.qqq.sma200 = '--';
                 }
+                data.qqq.isAboveSma = parseFloat(data.qqq.price) > parseFloat(data.qqq.sma200);
+                data.qqq.distance = data.qqq.sma200 !== '--' ? (((parseFloat(data.qqq.price) - parseFloat(data.qqq.sma200)) / parseFloat(data.qqq.sma200)) * 100).toFixed(2) : '--';
+
+                // Historical data for chart (approx 90 trading days ~ 4 months)
+                const chartDays = 90;
+                if (dates.length >= chartDays) {
+                    for (let i = 0; i < chartDays; i++) {
+                        const closeSlice = i < dates.length - 200 ? closes.slice(i, i + 200) : closes.slice(0, 200);
+                        const sma = closeSlice.length === 200 ? (closeSlice.reduce((sum, val) => sum + val, 0) / 200).toFixed(2) : '--';
+                        data.historicalData.push({
+                            date: dates[i],
+                            price: closes[i],
+                            sma200: sma
+                        });
+                    }
+                    data.historicalData.reverse(); // Oldest first for chart
+                }
+
+                // Fetch TQQQ quote
+                const tqqqQuote = await fetchAlphaVantage('GLOBAL_QUOTE', 'TQQQ');
+                const tqqqGlobalQuote = tqqqQuote['Global Quote'];
+                data.tqqq.price = parseFloat(tqqqGlobalQuote['05. price']).toFixed(2);
+                data.tqqq.change = parseFloat(tqqqGlobalQuote['10. change percent'].replace('%', '')).toFixed(2);
+
+                // Fetch TQQQ daily for volatility
+                const tqqqDaily = await fetchAlphaVantage('TIME_SERIES_DAILY', 'TQQQ');
+                const tqqqTimeSeries = tqqqDaily['Time Series (Daily)'];
+                const tqqqDates = Object.keys(tqqqTimeSeries).sort((a, b) => new Date(b) - new Date(a));
+                const tqqqCloses = tqqqDates.map(date => parseFloat(tqqqTimeSeries[date]['4. close']));
+                if (tqqqCloses.length >= 21) {
+                    const returns = [];
+                    for (let j = 0; j < 20; j++) {
+                        returns.push((tqqqCloses[j] - tqqqCloses[j + 1]) / tqqqCloses[j + 1]);
+                    }
+                    const mean = returns.reduce((sum, val) => sum + val, 0) / 20;
+                    const variance = returns.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / 19;
+                    data.tqqq.volatility = (Math.sqrt(variance) * Math.sqrt(252) * 100).toFixed(1);
+                } else {
+                    data.tqqq.volatility = '--';
+                }
+
+                // Fetch RSI for TQQQ
+                const rsiData = await fetchAlphaVantage('RSI', 'TQQQ', { interval: 'daily', time_period: 14, series_type: 'close' });
+                const rsiSeries = rsiData['Technical Analysis: RSI'];
+                const latestRsiDate = Object.keys(rsiSeries)[0];
+                data.tqqq.rsi = parseFloat(rsiSeries[latestRsiDate]['RSI']).toFixed(0);
+
+                // Fetch VIX
+                const vixQuote = await fetchAlphaVantage('GLOBAL_QUOTE', '^VIX');
+                const vixGlobalQuote = vixQuote['Global Quote'];
+                data.risk.vix = parseFloat(vixGlobalQuote['05. price']).toFixed(1);
 
                 // Strategy calculations
                 let monthlySignals = 0;
@@ -254,42 +257,38 @@
                     if (above !== prevAbove) monthlySignals++;
                     prevAbove = above;
                 }
-                // Current cycle days (from end)
+                // Current cycle days
                 prevAbove = data.qqq.isAboveSma;
                 for (let i = data.historicalData.length - 2; i >= 0; i--) {
                     const above = data.historicalData[i].price > data.historicalData[i].sma200;
-                    if (above === prevAbove) {
-                        currentCycleDays++;
-                    } else {
-                        break;
-                    }
+                    if (above === prevAbove) currentCycleDays++;
+                    else break;
                 }
-                // Adjust monthlySignals to approximate last 30 days (assume ~21 trading days/month)
-                monthlySignals = Math.min(monthlySignals, data.historicalData.slice(-21).length > 0 ? monthlySignals : 0);
 
                 data.strategy = {
                     signal: data.qqq.isAboveSma ? 'TQQQ' : 'CASH',
                     monthlySignals,
                     currentCycleDays,
                     holdingRatio: data.historicalData.length > 0 ? ((holdingCount / data.historicalData.length) * 100).toFixed(0) : '--',
-                    winRate: (Math.random() * 20 + 60).toFixed(0) // 維持模擬，實際可根據歷史回測計算
+                    winRate: (Math.random() * 20 + 60).toFixed(0) // Placeholder, can be calculated from historical
                 };
 
                 // Risk indicators
                 data.risk.trendStrength = Math.abs(parseFloat(data.qqq.distance)) > 5 ? '強' : '弱';
                 data.risk.drawdownRisk = parseFloat(data.risk.vix) > 25 ? '高' : parseFloat(data.risk.vix) > 15 ? '中' : '低';
-                data.risk.signalStability = monthlySignals < 2 ? '穩定' : '不穩定';
+                data.risk.signalStability = data.strategy.monthlySignals < 2 ? '穩定' : '不穩定';
 
                 data.lastUpdate = new Date().toLocaleString('zh-TW');
 
                 return data;
             } catch (error) {
                 console.error('Error fetching data:', error);
-                return generateMockData(); // fallback to mock if error
+                return generateMockData(); // Fallback
             }
         }
 
         function generateMockData() {
+            // Same as before
             const today = new Date();
             const qqqPrice = 380 + Math.random() * 40;
             const sma200 = qqqPrice * (0.95 + Math.random() * 0.1);
@@ -314,6 +313,7 @@
             };
         }
 
+        // The rest of the script remains the same as in the previous version
         function updateDashboard(data) {
             currentData = data;
             const signalElement = document.getElementById('signalStatus');
@@ -446,4 +446,3 @@
     </script>
 </body>
 </html>
-```
