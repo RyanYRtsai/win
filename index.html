@@ -160,7 +160,7 @@
     <script>
         let chartInstance = null;
         let currentData = null;
-        const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com';
+        const YAHOO_BASE_URL = 'https://finance.yahoo.com';
 
         async function fetchYahooQuote(symbols) {
             const response = await fetch(`${YAHOO_BASE_URL}/v7/finance/quote?symbols=${symbols}`);
