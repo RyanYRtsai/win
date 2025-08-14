@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>TQQQ LRS 策略儀表板（Finnhub）</title>
+  <title>TQQQ LRS 策略儀表板（Yahoo Finance）</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
@@ -35,32 +35,32 @@
     .loading{text-align:center;color:white;font-size:1.1rem;margin:40px 0}
     .loading::after{content:'...';animation:dots 1.5s steps(4,end) infinite}
     @keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
-    .refresh-btn{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:white;padding:8px 12px;border-radius:8px;cursor:pointer;transition:all .3s ease;backdrop-filter:blur(10px)}
-    .refresh-btn:hover{background:rgba(255,255,255,.3);transform:scale(1.05)}
+    .btn{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:white;padding:8px 12px;border-radius:8px;cursor:pointer;transition:all .3s ease;backdrop-filter:blur(10px)}
+    .btn:hover{background:rgba(255,255,255,.3);transform:scale(1.05)}
     .alert{background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;padding:16px;border-radius:8px;margin-bottom:20px;text-align:center;font-weight:600}
     .badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:.78rem}
     .badge-ok{background:#16a34a;color:white}
     .badge-fail{background:#dc2626;color:white}
-    .tooltip{background:rgba(255,255,255,.2);color:#fff;padding:6px 10px;border-radius:8px}
+    .muted{opacity:.8}
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>📊 TQQQ LRS 策略儀表板（Finnhub）</h1>
+      <h1>📊 TQQQ LRS 策略儀表板（Yahoo Finance）</h1>
       <div class="last-updated">
         <span id="lastUpdate">載入中...</span>
-        <button class="refresh-btn" onclick="refreshData()">🔄 更新（日線）</button>
+        <button class="btn" onclick="refreshDaily()">🔄 更新（日線）</button>
       </div>
       <div class="header-right">
-        <button class="refresh-btn" onclick="runHealthCheck()">🩺 健康檢查</button>
-        <span id="apiHealth" class="badge">API 檢測中</span>
-        <span id="wsHealth" class="badge">WS 檢測中</span>
+        <button class="btn" onclick="runHealthCheck()">🩺 健康檢查</button>
+        <span id="apiHealth" class="badge muted">API 檢測中</span>
+        <span id="wsHealth" class="badge muted" title="本版未啟用 WS">WS 未使用</span>
       </div>
     </div>
 
     <div id="loadingIndicator" class="loading"> 正在載入市場數據 </div>
-    <div id="errorAlert" class="alert" style="display:none;">⚠️ 無法載入數據，請檢查金鑰或稍後重試</div>
+    <div id="errorAlert" class="alert" style="display:none;">⚠️ 無法載入數據，請稍後重試</div>
 
     <div id="dashboardContent" class="dashboard" style="display:none;">
       <div class="card signal-card">
@@ -119,35 +119,44 @@
   </div>
 
   <script>
-    // ====== Finnhub 設定 ======
-    const FINNHUB_KEY = 'd2ev6o9r01qmrq4p164gd2ev6o9r01qmrq4p1650';
-    const FH_BASE = 'https://finnhub.io/api/v1';
-    const WS_URL = `wss://ws.finnhub.io?token=${encodeURIComponent(FINNHUB_KEY)}`;
+    // ===== Yahoo Finance endpoints =====
+    const YF_QUOTE = (symbols) => 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + encodeURIComponent(symbols.join(','));
+    // chart API: range: 1y/2y/5y/max ; interval: 1d/1wk/1mo
+    const YF_CHART = (symbol, range='2y', interval='1d') =>
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&events=div%2Csplit&includeAdjustedClose=true`;
 
-    // ====== 額度友善策略（可調） ======
-    const QUOTE_CACHE_MS = 10 * 60 * 1000;   // /quote 快取 10 分鐘
-    const CANDLE_CACHE_MS = 24 * 60 * 60 * 1000; // 日線快取 1 天
-    const WS_POLL_FALLBACK_MS = 60 * 1000;   // WS 失敗時，QQQ/TQQQ 每 1 分鐘輪詢
-    const VIX_REST_FALLBACK_MS = 10 * 60 * 1000; // VIX 串流失敗時，每 10 分鐘抓一次
-    const VIX_WS_WAIT_MS = 20 * 1000;        // 嘗試 VIX 串流等待 20 秒
+    // ===== Quotas & cache (minimize requests) =====
+    const QUOTE_POLL_MS   = 3 * 60 * 1000;     // 每 3 分鐘抓一次 quote（單筆請求拿多檔）
+    const QUOTE_CACHE_MS  = 10 * 60 * 1000;    // quote 快取 10 分鐘（健康檢查不走快取）
+    const CHART_CACHE_MS  = 24 * 60 * 60 * 1000; // 日線快取 1 天
+    const LS_PREFIX = 'yf_cache_';
 
-    // ====== localStorage 快取 ======
-    const LS_PREFIX = 'tqqq_fh_';
-    function cacheGet(k){try{const r=localStorage.getItem(LS_PREFIX+k);if(!r)return null;const o=JSON.parse(r);if(o.exp && Date.now()>o.exp){localStorage.removeItem(LS_PREFIX+k);return null}return o.val}catch{return null}}
-    function cacheSet(k,v,ttl){localStorage.setItem(LS_PREFIX+k,JSON.stringify({val:v,exp:ttl?Date.now()+ttl:0}))}
-
-    async function fetchJSON(url, cacheKey=null, ttlMs=0){
-      if(cacheKey){const c=cacheGet(cacheKey); if(c) return c;}
-      const res = await fetch(url);
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const j = await res.json();
-      if(cacheKey && ttlMs) cacheSet(cacheKey,j,ttlMs);
+    function cacheGet(key){
+      try{ const raw = localStorage.getItem(LS_PREFIX+key);
+        if(!raw) return null;
+        const obj = JSON.parse(raw);
+        if(obj.exp && Date.now()>obj.exp){ localStorage.removeItem(LS_PREFIX+key); return null; }
+        return obj.val;
+      }catch{ return null; }
+    }
+    function cacheSet(key, val, ttl){
+      localStorage.setItem(LS_PREFIX+key, JSON.stringify({ val, exp: ttl? Date.now()+ttl : 0 }));
+    }
+    async function fetchJSON(url, cacheKey=null, ttl=0){
+      if(cacheKey){
+        const c = cacheGet(cacheKey);
+        if(c) return c;
+      }
+      const r = await fetch(url, { headers: { 'Accept': 'application/json' }});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      if(cacheKey && ttl) cacheSet(cacheKey, j, ttl);
       return j;
     }
 
-    // ====== 指標 ======
-    function computeSMA(arr, win){ if(arr.length<win) return null; const s=arr.slice(-win).reduce((a,b)=>a+b,0); return s/win }
-    function computeRSI(arr, p=14){
+    // ===== Indicators =====
+    function sma(arr, n){ if(arr.length<n) return null; const s=arr.slice(-n).reduce((a,b)=>a+b,0); return s/n; }
+    function rsi(arr, p=14){
       if(arr.length<=p) return null;
       let g=0,l=0;
       for(let i=arr.length-p;i<arr.length;i++){
@@ -157,7 +166,7 @@
       const rs = l===0 ? 100 : g/l;
       return 100 - (100/(1+rs));
     }
-    function computeVol(arr, look=20){
+    function vol(arr, look=20){
       if(arr.length<look+1) return null;
       const seg = arr.slice(-look-1);
       const rets = [];
@@ -167,40 +176,56 @@
       return Math.sqrt(v)*Math.sqrt(252)*100;
     }
 
-    // ====== REST 端點 ======
-    async function getDailyCandles(symbol, days=500){
-      const to = Math.floor(Date.now()/1000);
-      const from = to - Math.floor(days*24*60*60*1.2);
-      const url = `${FH_BASE}/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${to}&token=${encodeURIComponent(FINNHUB_KEY)}`;
-      const j = await fetchJSON(url, `candle_${symbol}`, CANDLE_CACHE_MS);
-      if(j.s!=='ok') throw new Error('No candle data: '+symbol);
-      const dates = j.t.map(ts => new Date(ts*1000).toISOString().slice(0,10));
-      const closes = j.c;
-      return {dates, closes};
+    // ===== Parse Yahoo responses =====
+    async function getQuotes(symbols, useCache=true){
+      const url = YF_QUOTE(symbols);
+      const cacheKey = 'quote_' + symbols.join('_');
+      const ttl = useCache ? QUOTE_CACHE_MS : 0;
+      const j = await fetchJSON(url, useCache? cacheKey : null, ttl);
+      const rows = j.quoteResponse?.result || [];
+      const map = {};
+      for(const r of rows){
+        map[r.symbol] = {
+          price: r.regularMarketPrice ?? null,
+          changePct: r.regularMarketChangePercent ?? null,
+          prevClose: r.regularMarketPreviousClose ?? null,
+          time: r.regularMarketTime ? new Date(r.regularMarketTime*1000) : null
+        };
+      }
+      return map;
     }
 
-    async function getQuote(symbol){
-      const url = `${FH_BASE}/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(FINNHUB_KEY)}`;
-      const j = await fetchJSON(url, `quote_${symbol}`, QUOTE_CACHE_MS);
-      return { price:j.c||0, changePct:j.dp||0, prevClose:j.pc||0, ts:j.t? new Date(j.t*1000): new Date() };
+    async function getDailyCloses(symbol, range='2y'){
+      const url = YF_CHART(symbol, range, '1d');
+      const cacheKey = `chart_${symbol}_${range}_1d`;
+      const j = await fetchJSON(url, cacheKey, CHART_CACHE_MS);
+      const res = j.chart?.result?.[0];
+      if(!res) throw new Error('No chart data for '+symbol);
+      const ts = res.timestamp || [];
+      const closes = (res.indicators?.adjclose?.[0]?.adjclose) ||
+                     (res.indicators?.quote?.[0]?.close) || [];
+      const dates = ts.map(t=> new Date(t*1000).toISOString().slice(0,10));
+      // 過濾 null close
+      const outDates=[], outCloses=[];
+      for(let i=0;i<closes.length;i++){
+        const c = closes[i];
+        if(c!=null && isFinite(c)){
+          outDates.push(dates[i]);
+          outCloses.push(c);
+        }
+      }
+      return { dates: outDates, closes: outCloses };
     }
 
-    // ====== WebSocket（即時） ======
-    let ws=null, wsTimer=null, wsBackoff=2000, wsHealthy=false;
-    const subs = new Set(['QQQ','TQQQ']); // 先訂 QQQ/TQQQ
-    const lastPrice = { QQQ: null, TQQQ: null, VIX: null };
-    const prevClose = { QQQ: null, TQQQ: null, VIX: null };
-
-    const VIX_SYMBOL_CANDIDATES = ['^VIX','VIX','CBOE:VIX','INDEX:VIX','TVC:VIX'];
-    let vixStreamingOK = false;
-    let vixRestTimer = null;
-
-    function setWSBadge(ok){
-      wsHealthy = ok;
-      const el = document.getElementById('wsHealth');
-      el.textContent = ok ? 'WS 連線正常' : 'WS 未連線';
-      el.className = 'badge ' + (ok ? 'badge-ok' : 'badge-fail');
+    // ===== Live-ish update (poll quotes only) =====
+    let livePollTimer=null;
+    async function startLivePoll(){
+      if(livePollTimer) clearInterval(livePollTimer);
+      await refreshQuotes(); // 先更新一次
+      livePollTimer = setInterval(refreshQuotes, QUOTE_POLL_MS);
     }
+
+    // ===== UI helpers =====
     function setAPIBadge(ok, msg=''){
       const el = document.getElementById('apiHealth');
       el.textContent = ok ? 'API 正常' : 'API 異常';
@@ -208,21 +233,156 @@
       if(msg) el.title = msg;
     }
 
-    function openWS(){
-      try{ ws = new WebSocket(WS_URL); }catch(e){ setWSBadge(false); scheduleReconnect(); return; }
-      ws.onopen = ()=>{
-        setWSBadge(true);
-        wsBackoff = 2000;
-        // 訂閱股票
-        subs.forEach(s => ws.send(JSON.stringify({type:'subscribe', symbol:s})));
-        // 嘗試訂閱 VIX 指數（若供應商支援）
-        VIX_SYMBOL_CANDIDATES.forEach(sym => ws.send(JSON.stringify({type:'subscribe', symbol:sym})));
-        // 若 20 秒沒收到任何 VIX 相關訊息，啟用 REST 後備
-        setTimeout(()=>{ if(!vixStreamingOK) startVixRestFallback(); }, VIX_WS_WAIT_MS);
-      };
-      ws.onmessage = (ev)=>{
-        const msg = JSON.parse(ev.data);
-        if(msg.type==='trade' && Array.isArray(msg.data)){
-          msg.data.forEach(t=>{
-            const s = t.s, p = t.p;
-            // 偵測 VIX 指數串
+    function updateQuoteUI(sym, price, prevClose, changePct){
+      if(sym==='QQQ'){
+        document.getElementById('qqqPrice').textContent = price? ('$'+price.toFixed(2)) : '--';
+        const pct = changePct ?? (price && prevClose ? ((price-prevClose)/prevClose*100) : null);
+        const t = document.getElementById('qqqChange');
+        t.textContent = (pct!=null && isFinite(pct)) ? pct.toFixed(2)+'%' : '--%';
+        t.className = 'metric-value ' + ((pct??0)>=0 ? 'positive' : 'negative');
+      } else if(sym==='TQQQ'){
+        document.getElementById('tqqqPrice').textContent = price? ('$'+price.toFixed(2)) : '--';
+        const pct = changePct ?? (price && prevClose ? ((price-prevClose)/prevClose*100) : null);
+        const t = document.getElementById('tqqqChange');
+        t.textContent = (pct!=null && isFinite(pct)) ? pct.toFixed(2)+'%' : '--%';
+        t.className = 'metric-value ' + ((pct??0)>=0 ? 'positive' : 'negative');
+      } else if(sym==='^VIX'){
+        if(price!=null) document.getElementById('vixLevel').textContent = price.toFixed(2);
+        const risk = (price>30)?'高':(price>20)?'中':'低';
+        document.getElementById('drawdownRisk').textContent = isFinite(price)? risk : '--';
+      }
+    }
+
+    // ===== Global state for chart/indicators =====
+    let chartInstance=null;
+    let latestQQQ = { price:null, sma200:null, isAbove:null, dist:null };
+
+    async function refreshDaily(){
+      try{
+        document.getElementById('loadingIndicator').style.display='block';
+        document.getElementById('dashboardContent').style.display='none';
+        document.getElementById('chartSection').style.display='none';
+
+        // 拿日線（一次請求一檔；且快取 1 天）
+        const [qqqD, tqqqD] = await Promise.all([
+          getDailyCloses('QQQ','2y'),
+          getDailyCloses('TQQQ','2y')
+        ]);
+
+        const qqqSMA200 = sma(qqqD.closes, 200);
+        latestQQQ.sma200 = qqqSMA200;
+
+        // 近 90 交易日資料 + SMA200
+        const hist = [];
+        const n = Math.min(90, qqqD.dates.length);
+        for(let i=qqqD.dates.length - n; i<qqqD.dates.length; i++){
+          const slice = qqqD.closes.slice(0, i+1);
+          const s200 = sma(slice, 200);
+          hist.push({ date: qqqD.dates[i], price: qqqD.closes[i], sma200: s200 });
+        }
+
+        // TQQQ 指標（用日線）
+        const tVol = vol(tqqqD.closes, 20);
+        const tRSI = rsi(tqqqD.closes, 14);
+
+        // 畫圖
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        const labels = hist.map(d=>d.date);
+        const priceSeries = hist.map(d=>d.price);
+        const smaSeries = hist.map(d=>d.sma200);
+        if(chartInstance) chartInstance.destroy();
+        chartInstance = new Chart(ctx, {
+          type:'line',
+          data:{labels, datasets:[
+            {label:'QQQ', data:priceSeries, borderWidth:2, fill:false, tension:.2},
+            {label:'SMA200', data:smaSeries, borderWidth:2, borderDash:[6,4], fill:false, tension:.2}
+          ]},
+          options:{responsive:true, plugins:{legend:{display:true}}}
+        });
+
+        // 更新右側統計（部分需要 quote 才能完成 isAbove/距離）
+        document.getElementById('tqqqVolatility').textContent = tVol? tVol.toFixed(1)+'%':'--';
+        document.getElementById('tqqqRsi').textContent = tRSI? tRSI.toFixed(0):'--';
+
+        document.getElementById('loadingIndicator').style.display='none';
+        document.getElementById('errorAlert').style.display='none';
+        document.getElementById('dashboardContent').style.display='grid';
+        document.getElementById('chartSection').style.display='block';
+
+        // 取一次 quote（走快取），補齊現價 & 訊號
+        await refreshQuotes(true);
+
+      }catch(err){
+        console.error(err);
+        document.getElementById('loadingIndicator').style.display='none';
+        document.getElementById('errorAlert').style.display='block';
+        setAPIBadge(false, '日線載入失敗');
+      }
+    }
+
+    async function refreshQuotes(useCache=true){
+      try{
+        const syms = ['QQQ','TQQQ','^VIX'];
+        const map = await getQuotes(syms, useCache);
+        const qqq = map['QQQ']||{}, tqqq = map['TQQQ']||{}, vix = map['^VIX']||{};
+        // 更新 UI
+        updateQuoteUI('QQQ', qqq.price, qqq.prevClose, qqq.changePct);
+        updateQuoteUI('TQQQ', tqqq.price, tqqq.prevClose, tqqq.changePct);
+        updateQuoteUI('^VIX', vix.price, vix.prevClose, vix.changePct);
+
+        // 補齊策略 & LRS 狀態（需要最新 QQQ + SMA200）
+        latestQQQ.price = qqq.price ?? null;
+        if(latestQQQ.price!=null && latestQQQ.sma200!=null){
+          latestQQQ.isAbove = latestQQQ.price > latestQQQ.sma200;
+          latestQQQ.dist = ((latestQQQ.price - latestQQQ.sma200)/latestQQQ.sma200*100);
+          applySignal(latestQQQ.isAbove, latestQQQ.dist);
+        }
+
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
+        setAPIBadge(true,'');
+      }catch(err){
+        console.error('[refreshQuotes] error', err);
+        setAPIBadge(false, 'Quote 失敗');
+      }
+    }
+
+    function applySignal(isAbove, distance){
+      const signalEl = document.getElementById('signalStatus');
+      const descEl = document.getElementById('signalDescription');
+      const actionEl = document.getElementById('actionRequired');
+
+      signalEl.className = 'signal-status ' + (isAbove ? 'signal-tqqq' : 'signal-cash');
+      signalEl.textContent = isAbove ? '持有 TQQQ' : '持有 現金腿';
+      descEl.textContent = isAbove
+        ? 'QQQ 收盤 > SMA200，啟用槓桿腿'
+        : 'QQQ 收盤 ≤ SMA200，轉入現金腿';
+
+      document.getElementById('qqqSma200').textContent = latestQQQ.sma200!=null ? ('$'+latestQQQ.sma200.toFixed(2)) : '--';
+      document.getElementById('qqqDistance').textContent = (distance!=null && isFinite(distance)) ? distance.toFixed(2)+'%' : '--';
+      document.getElementById('trendStrength').textContent = (distance!=null && Math.abs(distance)>5) ? '強':'弱';
+      document.getElementById('signalStability').textContent = '—'; // 簡化：可擴充交叉次數
+      actionEl.style.display = 'none';
+    }
+
+    // 健康檢查：打一次 quote（不走快取）
+    async function runHealthCheck(){
+      try{
+        const map = await getQuotes(['QQQ','TQQQ','^VIX'], false); // no cache
+        const ok = ['QQQ','TQQQ','^VIX'].every(s=> map[s]?.price!=null);
+        setAPIBadge(ok, ok?'OK':'有代碼無回應（看 Console）');
+        console.log('[HealthCheck] quotes:', map);
+      }catch(e){
+        console.error('[HealthCheck] error', e);
+        setAPIBadge(false, String(e));
+      }
+    }
+
+    // ===== Init =====
+    (async function(){
+      await refreshDaily();     // 先載入日線與一次 quote（走快取）
+      startLivePoll();          // 之後每 3 分鐘更新一次 quote（單筆請求，含 QQQ/TQQQ/^VIX）
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshQuotes(false); });
+    })();
+  </script>
+</body>
+</html>
