@@ -160,91 +160,99 @@
     <script>
         let chartInstance = null;
         let currentData = null;
-        const API_KEY = 'BAKYJMTPF6SN05W9';
-        const BASE_URL = 'https://www.alphavantage.co/query';
+        const YAHOO_BASE_URL = 'https://query1.finance.yahoo.com';
 
-        async function fetchAlphaVantage(functionName, symbol, params = {}) {
-            const urlParams = new URLSearchParams({ function: functionName, symbol, apikey: API_KEY, ...params });
-            const response = await fetch(`${BASE_URL}?${urlParams.toString()}`);
+        async function fetchYahooQuote(symbols) {
+            const response = await fetch(`${YAHOO_BASE_URL}/v7/finance/quote?symbols=${symbols}`);
             if (!response.ok) {
-                throw new Error('API request failed');
+                throw new Error('Yahoo quote request failed');
             }
-            return await response.json();
+            const json = await response.json();
+            return json.quoteResponse.result;
+        }
+
+        async function fetchYahooChart(symbol, range = '1y', interval = '1d') {
+            const response = await fetch(`${YAHOO_BASE_URL}/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`);
+            if (!response.ok) {
+                throw new Error('Yahoo chart request failed');
+            }
+            const json = await response.json();
+            return json.chart.result[0];
+        }
+
+        function calculateSMA(closes, period) {
+            if (closes.length < period) return '--';
+            return (closes.slice(-period).reduce((sum, val) => sum + val, 0) / period).toFixed(2);
+        }
+
+        function calculateVolatility(closes, period = 20) {
+            if (closes.length < period + 1) return '--';
+            const returns = [];
+            for (let i = closes.length - period; i < closes.length; i++) {
+                returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+            }
+            const mean = returns.reduce((sum, val) => sum + val, 0) / period;
+            const variance = returns.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (period - 1);
+            return (Math.sqrt(variance) * Math.sqrt(252) * 100).toFixed(1);
+        }
+
+        function calculateRSI(closes, period = 14) {
+            if (closes.length < period + 1) return '--';
+            let avgGain = 0, avgLoss = 0;
+            for (let i = 1; i <= period; i++) {
+                const change = closes[closes.length - i] - closes[closes.length - i - 1];
+                if (change > 0) avgGain += change;
+                else avgLoss -= change;
+            }
+            avgGain /= period;
+            avgLoss /= period;
+            const rs = avgGain / avgLoss || 0;
+            return (100 - 100 / (1 + rs)).toFixed(0);
         }
 
         async function fetchMarketData() {
             try {
                 const data = { qqq: {}, tqqq: {}, risk: {}, strategy: {}, historicalData: [] };
 
-                // Fetch QQQ quote
-                const qqqQuote = await fetchAlphaVantage('GLOBAL_QUOTE', 'QQQ');
-                const qqqGlobalQuote = qqqQuote['Global Quote'];
-                data.qqq.price = parseFloat(qqqGlobalQuote['05. price']).toFixed(2);
-                data.qqq.change = parseFloat(qqqGlobalQuote['10. change percent'].replace('%', '')).toFixed(2);
+                // Fetch quotes for QQQ, TQQQ, ^VIX
+                const quotes = await fetchYahooQuote('QQQ,TQQQ,^VIX');
+                const qqqQuote = quotes.find(q => q.symbol === 'QQQ');
+                const tqqqQuote = quotes.find(q => q.symbol === 'TQQQ');
+                const vixQuote = quotes.find(q => q.symbol === '^VIX');
 
-                // Fetch QQQ daily time series for closes and SMA calculation
-                const qqqDaily = await fetchAlphaVantage('TIME_SERIES_DAILY', 'QQQ');
-                const timeSeries = qqqDaily['Time Series (Daily)'];
-                const dates = Object.keys(timeSeries).sort((a, b) => new Date(b) - new Date(a)); // Latest first
-                const closes = dates.map(date => parseFloat(timeSeries[date]['4. close']));
+                data.qqq.price = qqqQuote.regularMarketPrice.toFixed(2);
+                data.qqq.change = qqqQuote.regularMarketChangePercent.toFixed(2);
+                data.tqqq.price = tqqqQuote.regularMarketPrice.toFixed(2);
+                data.tqqq.change = tqqqQuote.regularMarketChangePercent.toFixed(2);
+                data.risk.vix = vixQuote.regularMarketPrice.toFixed(1);
 
-                if (closes.length >= 200) {
-                    const last200Closes = closes.slice(0, 200);
-                    data.qqq.sma200 = (last200Closes.reduce((sum, val) => sum + val, 0) / 200).toFixed(2);
-                } else {
-                    data.qqq.sma200 = '--';
-                }
+                // Fetch historical for QQQ
+                const qqqChart = await fetchYahooChart('QQQ', '1y', '1d');
+                const qqqTimestamps = qqqChart.timestamp;
+                const qqqCloses = qqqChart.indicators.quote[0].close.filter(c => c !== null);
+                data.qqq.sma200 = calculateSMA(qqqCloses, 200);
                 data.qqq.isAboveSma = parseFloat(data.qqq.price) > parseFloat(data.qqq.sma200);
                 data.qqq.distance = data.qqq.sma200 !== '--' ? (((parseFloat(data.qqq.price) - parseFloat(data.qqq.sma200)) / parseFloat(data.qqq.sma200)) * 100).toFixed(2) : '--';
 
-                // Historical data for chart (approx 90 trading days ~ 4 months)
+                // Historical data for chart (last 90 days)
                 const chartDays = 90;
-                if (dates.length >= chartDays) {
-                    for (let i = 0; i < chartDays; i++) {
-                        const closeSlice = i < dates.length - 200 ? closes.slice(i, i + 200) : closes.slice(0, 200);
-                        const sma = closeSlice.length === 200 ? (closeSlice.reduce((sum, val) => sum + val, 0) / 200).toFixed(2) : '--';
-                        data.historicalData.push({
-                            date: dates[i],
-                            price: closes[i],
-                            sma200: sma
-                        });
-                    }
-                    data.historicalData.reverse(); // Oldest first for chart
+                const numDays = Math.min(chartDays, qqqCloses.length);
+                for (let i = 0; i < numDays; i++) {
+                    const idx = qqqCloses.length - numDays + i;
+                    const sma = calculateSMA(qqqCloses.slice(0, idx + 1), 200);
+                    const date = new Date(qqqTimestamps[idx] * 1000).toISOString().split('T')[0];
+                    data.historicalData.push({
+                        date: date,
+                        price: qqqCloses[idx],
+                        sma200: sma
+                    });
                 }
 
-                // Fetch TQQQ quote
-                const tqqqQuote = await fetchAlphaVantage('GLOBAL_QUOTE', 'TQQQ');
-                const tqqqGlobalQuote = tqqqQuote['Global Quote'];
-                data.tqqq.price = parseFloat(tqqqGlobalQuote['05. price']).toFixed(2);
-                data.tqqq.change = parseFloat(tqqqGlobalQuote['10. change percent'].replace('%', '')).toFixed(2);
-
-                // Fetch TQQQ daily for volatility
-                const tqqqDaily = await fetchAlphaVantage('TIME_SERIES_DAILY', 'TQQQ');
-                const tqqqTimeSeries = tqqqDaily['Time Series (Daily)'];
-                const tqqqDates = Object.keys(tqqqTimeSeries).sort((a, b) => new Date(b) - new Date(a));
-                const tqqqCloses = tqqqDates.map(date => parseFloat(tqqqTimeSeries[date]['4. close']));
-                if (tqqqCloses.length >= 21) {
-                    const returns = [];
-                    for (let j = 0; j < 20; j++) {
-                        returns.push((tqqqCloses[j] - tqqqCloses[j + 1]) / tqqqCloses[j + 1]);
-                    }
-                    const mean = returns.reduce((sum, val) => sum + val, 0) / 20;
-                    const variance = returns.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / 19;
-                    data.tqqq.volatility = (Math.sqrt(variance) * Math.sqrt(252) * 100).toFixed(1);
-                } else {
-                    data.tqqq.volatility = '--';
-                }
-
-                // Fetch RSI for TQQQ
-                const rsiData = await fetchAlphaVantage('RSI', 'TQQQ', { interval: 'daily', time_period: 14, series_type: 'close' });
-                const rsiSeries = rsiData['Technical Analysis: RSI'];
-                const latestRsiDate = Object.keys(rsiSeries)[0];
-                data.tqqq.rsi = parseFloat(rsiSeries[latestRsiDate]['RSI']).toFixed(0);
-
-                // Fetch VIX
-                const vixQuote = await fetchAlphaVantage('GLOBAL_QUOTE', '^VIX');
-                const vixGlobalQuote = vixQuote['Global Quote'];
-                data.risk.vix = parseFloat(vixGlobalQuote['05. price']).toFixed(1);
+                // Fetch historical for TQQQ
+                const tqqqChart = await fetchYahooChart('TQQQ', '1y', '1d');
+                const tqqqCloses = tqqqChart.indicators.quote[0].close.filter(c => c !== null);
+                data.tqqq.volatility = calculateVolatility(tqqqCloses);
+                data.tqqq.rsi = calculateRSI(tqqqCloses);
 
                 // Strategy calculations
                 let monthlySignals = 0;
@@ -264,31 +272,25 @@
                     if (above === prevAbove) currentCycleDays++;
                     else break;
                 }
-
                 data.strategy = {
                     signal: data.qqq.isAboveSma ? 'TQQQ' : 'CASH',
                     monthlySignals,
                     currentCycleDays,
                     holdingRatio: data.historicalData.length > 0 ? ((holdingCount / data.historicalData.length) * 100).toFixed(0) : '--',
-                    winRate: (Math.random() * 20 + 60).toFixed(0) // Placeholder, can be calculated from historical
+                    winRate: (Math.random() * 20 + 60).toFixed(0) // Placeholder
                 };
-
                 // Risk indicators
                 data.risk.trendStrength = Math.abs(parseFloat(data.qqq.distance)) > 5 ? '強' : '弱';
                 data.risk.drawdownRisk = parseFloat(data.risk.vix) > 25 ? '高' : parseFloat(data.risk.vix) > 15 ? '中' : '低';
                 data.risk.signalStability = data.strategy.monthlySignals < 2 ? '穩定' : '不穩定';
-
                 data.lastUpdate = new Date().toLocaleString('zh-TW');
-
                 return data;
             } catch (error) {
                 console.error('Error fetching data:', error);
                 return generateMockData(); // Fallback
             }
         }
-
         function generateMockData() {
-            // Same as before
             const today = new Date();
             const qqqPrice = 380 + Math.random() * 40;
             const sma200 = qqqPrice * (0.95 + Math.random() * 0.1);
@@ -312,8 +314,6 @@
                 lastUpdate: new Date().toLocaleString('zh-TW')
             };
         }
-
-        // The rest of the script remains the same as in the previous version
         function updateDashboard(data) {
             currentData = data;
             const signalElement = document.getElementById('signalStatus');
@@ -329,120 +329,4 @@
                 } else {
                     actionElement.style.display = 'none';
                 }
-            } else {
-                signalElement.textContent = '💵 持有現金';
-                signalElement.className = 'signal-status signal-cash';
-                descElement.textContent = `QQQ 價格 ($${data.qqq.price}) 低於 200日均線 ($${data.qqq.sma200})`;
-                actionElement.style.display = 'none';
             }
-            document.getElementById('qqqPrice').textContent = `$${data.qqq.price}`;
-            document.getElementById('qqqSma200').textContent = `$${data.qqq.sma200}`;
-            const distanceElement = document.getElementById('qqqDistance');
-            distanceElement.textContent = `${data.qqq.distance}%`;
-            distanceElement.className = `metric-value ${parseFloat(data.qqq.distance) >= 0 ? 'positive' : 'negative'}`;
-            const qqqChangeElement = document.getElementById('qqqChange');
-            qqqChangeElement.textContent = `${data.qqq.change}%`;
-            qqqChangeElement.className = `metric-value ${parseFloat(data.qqq.change) >= 0 ? 'positive' : 'negative'}`;
-            document.getElementById('tqqqPrice').textContent = `$${data.tqqq.price}`;
-            const tqqqChangeElement = document.getElementById('tqqqChange');
-            tqqqChangeElement.textContent = `${data.tqqq.change}%`;
-            tqqqChangeElement.className = `metric-value ${parseFloat(data.tqqq.change) >= 0 ? 'positive' : 'negative'}`;
-            document.getElementById('tqqqVolatility').textContent = `${data.tqqq.volatility}%`;
-            document.getElementById('tqqqRsi').textContent = data.tqqq.rsi;
-            document.getElementById('monthlySignals').textContent = `${data.strategy.monthlySignals} 次`;
-            document.getElementById('currentCycleDays').textContent = `${data.strategy.currentCycleDays} 天`;
-            document.getElementById('tqqqHoldingRatio').textContent = `${data.strategy.holdingRatio}%`;
-            document.getElementById('winRate').textContent = `${data.strategy.winRate}%`;
-            document.getElementById('vixLevel').textContent = data.risk.vix;
-            document.getElementById('trendStrength').textContent = data.risk.trendStrength;
-            document.getElementById('drawdownRisk').textContent = data.risk.drawdownRisk;
-            document.getElementById('signalStability').textContent = data.risk.signalStability;
-            updateRecommendations(data);
-            document.getElementById('lastUpdate').textContent = `最後更新: ${data.lastUpdate}`;
-            document.getElementById('loadingIndicator').style.display = 'none';
-            document.getElementById('errorAlert').style.display = 'none';
-            document.getElementById('dashboardContent').style.display = 'grid';
-            document.getElementById('chartSection').style.display = 'block';
-            updateChart(data);
-        }
-
-        function updateRecommendations(data) {
-            const recommendations = [];
-            if (data.strategy.signal === 'TQQQ') {
-                recommendations.push('✅ <strong>持有 TQQQ</strong>：市場趨勢向上，繼續持有槓桿ETF');
-                if (Math.abs(parseFloat(data.qqq.distance)) < 2) {
-                    recommendations.push('⚠️ <strong>密切監控</strong>：價格接近200日均線，準備調整倉位');
-                }
-                if (parseFloat(data.tqqq.rsi) > 70) {
-                    recommendations.push('⚡ <strong>超買警告</strong>：RSI偏高，考慮部分獲利了結');
-                }
-            } else {
-                recommendations.push('💵 <strong>持有現金</strong>：市場趨勢向下，避險為主');
-                recommendations.push('👀 <strong>等待突破</strong>：關注QQQ重新站上200日均線的信號');
-            }
-            if (parseFloat(data.risk.vix) > 25) {
-                recommendations.push('🚨 <strong>高波動警告</strong>：VIX升高，降低風險暴露');
-            }
-            if (data.strategy.monthlySignals > 3) {
-                recommendations.push('📊 <strong>震盪市場</strong>：信號頻繁變化，注意交易成本');
-            }
-            document.getElementById('recommendations').innerHTML = recommendations.map(rec => `<div style="margin-bottom: 12px;">${rec}</div>`).join('');
-        }
-
-        function updateChart(data) {
-            const ctx = document.getElementById('priceChart').getContext('2d');
-            if (chartInstance) {
-                chartInstance.destroy();
-            }
-            const labels = data.historicalData.map(d => d.date);
-            const prices = data.historicalData.map(d => d.price);
-            const sma200Data = data.historicalData.map(d => d.sma200);
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        { label: 'QQQ 價格', data: prices, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 2, fill: false, tension: 0.2 },
-                        { label: '200日均線', data: sma200Data, borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 2, fill: false, tension: 0.2, borderDash: [5, 5] }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { intersect: false, mode: 'index' },
-                    plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 20 } } },
-                    scales: {
-                        x: { display: true, grid: { display: false }, ticks: { maxTicksLimit: 10 } },
-                        y: { display: true, grid: { color: 'rgba(0, 0, 0, 0.1)' } }
-                    }
-                }
-            });
-        }
-
-        async function refreshData() {
-            document.getElementById('loadingIndicator').style.display = 'block';
-            document.getElementById('dashboardContent').style.display = 'none';
-            document.getElementById('chartSection').style.display = 'none';
-            try {
-                const data = await fetchMarketData();
-                updateDashboard(data);
-            } catch (error) {
-                console.error('Error fetching data:', error);
-                document.getElementById('loadingIndicator').style.display = 'none';
-                document.getElementById('errorAlert').style.display = 'block';
-            }
-        }
-
-        // 初始載入
-        refreshData();
-        // 每5分鐘自動更新
-        setInterval(refreshData, 5 * 60 * 1000);
-        // 頁面可見性變化時重新載入
-        document.addEventListener('visibilitychange', function() {
-            if (!document.hidden) {
-                refreshData();
-            }
-        });
-    </script>
-</body>
-</html>
