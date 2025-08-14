@@ -237,7 +237,7 @@
           updateLiveQuoteUI('TQQQ', q2.price, q2.prevClose);
           document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-TW');
         }catch(e){ /* 靜默失敗 */ }
-      }, 60*1000); // 每 1 分鐘
+      }, 600*1000); // 每 5 分鐘
     }
     function stopPollFallback(){
       if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
