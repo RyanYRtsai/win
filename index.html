@@ -3,47 +3,92 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>TQQQ 槓桿策略 監測表 </title>
+  <title>TQQQ 槓桿策略 監測表</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <style>
-    /* 您的 CSS 樣式維持不變 */
-    *{margin:0;padding:0;box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:#333} .container{max-width:1400px;margin:0 auto;padding:20px} .header{text-align:center;margin-bottom:30px;color:white} .header h1{font-size:2.5rem;margin-bottom:10px;text-shadow:2px 2px 4px rgba(0,0,0,.3)} .last-updated{background:rgba(255,255,255,.2);padding:8px 16px;border-radius:20px;display:inline-block;backdrop-filter:blur(10px)} .dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:30px} .card{background:rgba(255,255,255,.95);border-radius:16px;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,.1);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);transition:transform .3s ease,box-shadow .3s ease} .card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,.15)} .card-title{font-size:1.2rem;font-weight:600;margin-bottom:16px;color:#2d3748;display:flex;align-items:center;gap:8px} .signal-card{text-align:center;position:relative;overflow:hidden} .signal-status{font-size:3rem;font-weight:bold;margin:20px 0;text-shadow:2px 2px 4px rgba(0,0,0,.1)} .signal-tqqq{color:#22c55e;animation:pulse 2s ease-in-out infinite} .signal-cash{color:#ef4444} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}} .signal-description{font-size:1.1rem;color:#64748b;margin-bottom:16px} .metric{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #e2e8f0} .metric:last-child{border-bottom:none} .metric-label{color:#64748b;font-size:.9rem} .metric-value{font-weight:600;font-size:1.1rem} .positive{color:#22c55e} .negative{color:#ef4444} .chart-container{grid-column:1 / -1;height:400px} .loading{text-align:center;color:white;font-size:1.2rem;margin:40px 0} .loading::after{content:'...';animation:dots 1.5s steps(4,end) infinite} @keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}} .refresh-btn{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:white;padding:8px 16px;border-radius:8px;cursor:pointer;transition:all .3s ease;backdrop-filter:blur(10px);margin-left: 10px;} .refresh-btn:hover{background:rgba(255,255,255,.3);transform:scale(1.05)} .alert{background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;padding:16px;border-radius:8px;margin-bottom:20px;text-align:center;font-weight:600}
+    /* 您的 CSS 樣式維持不變，僅新增 .neutral class */
+    *{margin:0;padding:0;box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;color:#333} .container{max-width:1400px;margin:0 auto;padding:20px} .header{text-align:center;margin-bottom:30px;color:white} .header h1{font-size:2.5rem;margin-bottom:10px;text-shadow:2px 2px 4px rgba(0,0,0,.3)} .last-updated{background:rgba(255,255,255,.2);padding:8px 16px;border-radius:20px;display:inline-block;backdrop-filter:blur(10px)} .dashboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:30px} .card{background:rgba(255,255,255,.95);border-radius:16px;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,.1);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.2);transition:transform .3s ease,box-shadow .3s ease} .card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,.15)} .card-title{font-size:1.2rem;font-weight:600;margin-bottom:16px;color:#2d3748;display:flex;align-items:center;gap:8px} .signal-card{text-align:center;position:relative;overflow:hidden} .signal-status{font-size:3rem;font-weight:bold;margin:20px 0;text-shadow:2px 2px 4px rgba(0,0,0,.1)} .signal-tqqq{color:#22c55e;animation:pulse 2s ease-in-out infinite} .signal-cash{color:#ef4444} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}} .signal-description{font-size:1.1rem;color:#64748b;margin-bottom:16px} .metric{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #e2e8f0} .metric:last-child{border-bottom:none} .metric-label{color:#64748b;font-size:.9rem} .metric-value{font-weight:600;font-size:1.1rem} .positive{color:#22c55e} .negative{color:#ef4444} .neutral{color:#f59e0b} .chart-container{grid-column:1 / -1;height:400px} .loading{text-align:center;color:white;font-size:1.2rem;margin:40px 0} .loading::after{content:'...';animation:dots 1.5s steps(4,end) infinite} @keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}} .refresh-btn{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:white;padding:8px 16px;border-radius:8px;cursor:pointer;transition:all .3s ease;backdrop-filter:blur(10px);margin-left: 10px;} .refresh-btn:hover{background:rgba(255,255,255,.3);transform:scale(1.05)} .alert{background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;padding:16px;border-radius:8px;margin-bottom:20px;text-align:center;font-weight:600}
   </style>
 </head>
 <body>
-  <div class="container"> <div class="header"> <h1> TQQQ 槓桿策略 監測表</h1> <div class="last-updated"> <span id="lastUpdate">載入中...</span> <button class="refresh-btn" onclick="refreshData()">🔄 強制更新日線</button> </div> </div> <div id="loadingIndicator" class="loading"> 正在載入市場數據 </div> <div id="errorAlert" class="alert" style="display:none;"></div> <div id="dashboardContent" class="dashboard" style="display:none;"> <!-- HTML 結構 --> <div class="card signal-card"> <h2 class="card-title">🎯 當前策略信號</h2> <div id="signalStatus" class="signal-status">--</div> <div id="signalDescription" class="signal-description">--</div> </div> <div class="card"> <h2 class="card-title">📈 QQQ 價格資訊</h2> <div class="metric"><span class="metric-label">當前價格</span><span id="qqqPrice" class="metric-value">$--</span></div> <div class="metric"><span class="metric-label">200日均線</span><span id="qqqSma200" class="metric-value">$--</span></div> <div class="metric"><span class="metric-label">距離均線</span><span id="qqqDistance" class="metric-value">--%</span></div> <div class="metric"><span class="metric-label">日變化</span><span id="qqqChange" class="metric-value">--%</span></div> </div> <div class="card"> <h2 class="card-title">🚀 TQQQ 價格資訊</h2> <div class="metric"><span class="metric-label">當前價格</span><span id="tqqqPrice" class="metric-value">$--</span></div> <div class="metric"><span class="metric-label">日變化</span><span id="tqqqChange" class="metric-value">--%</span></div> <div class="metric"><span class="metric-label">波動率 (20日)</span><span id="tqqqVolatility" class="metric-value">--%</span></div> <div class="metric"><span class="metric-label">RSI (14日)</span><span id="tqqqRsi" class="metric-value">--</span></div> </div> <div class="card"> <h2 class="card-title">⚠️ 風險指標</h2> <div class="metric"><span class="metric-label">市場狀態</span><span id="marketRegime" class="metric-value">--</span></div> <div class="metric"><span class="metric-label">VIX 代理 (VIXY)</span><span id="vixLevel" class="metric-value">--</span></div> </div> </div> <div id="chartSection" style="display:none;"> <div class="card chart-container"> <h2 class="card-title">📈 QQQ 價格 vs 200日均線 (近一年)</h2> <canvas id="priceChart"></canvas> </div> </div> </div>
+  <div class="container">
+    <div class="header">
+      <h1> TQQQ 槓桿策略 監測表</h1>
+      <div class="last-updated">
+        <span id="lastUpdate">載入中...</span>
+        <button class="refresh-btn" onclick="refreshData()">🔄 強制更新日線</button>
+      </div>
+    </div>
+    <div id="loadingIndicator" class="loading"> 正在載入市場數據 </div>
+    <div id="errorAlert" class="alert" style="display:none;"></div>
+    <div id="dashboardContent" class="dashboard" style="display:none;">
+      <!-- HTML 結構 -->
+      <div class="card signal-card">
+        <h2 class="card-title">🎯 當前策略信號</h2>
+        <div id="signalStatus" class="signal-status">--</div>
+        <div id="signalDescription" class="signal-description">--</div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">📈 QQQ 價格資訊</h2>
+        <div class="metric"><span class="metric-label">當前價格</span><span id="qqqPrice" class="metric-value">$--</span></div>
+        <div class="metric"><span class="metric-label">200日均線</span><span id="qqqSma200" class="metric-value">$--</span></div>
+        <div class="metric"><span class="metric-label">距離均線</span><span id="qqqDistance" class="metric-value">--%</span></div>
+        <div class="metric"><span class="metric-label">日變化</span><span id="qqqChange" class="metric-value">--%</span></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">🚀 TQQQ 價格資訊</h2>
+        <div class="metric"><span class="metric-label">當前價格</span><span id="tqqqPrice" class="metric-value">$--</span></div>
+        <div class="metric"><span class="metric-label">日變化</span><span id="tqqqChange" class="metric-value">--%</span></div>
+        <div class="metric"><span class="metric-label">波動率 (20日)</span><span id="tqqqVolatility" class="metric-value">--%</span></div>
+        <div class="metric"><span class="metric-label">RSI (14日)</span><span id="tqqqRsi" class="metric-value">--</span></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">⚠️ 風險指標</h2>
+        <div class="metric"><span class="metric-label">市場狀態 (趨勢)</span><span id="marketRegime" class="metric-value">--</span></div>
+        <div class="metric"><span class="metric-label">市場熱度 (情緒)</span><span id="marketHeat" class="metric-value">--</span></div>
+        <div class="metric"><span class="metric-label">恐慌指數 (VIX)</span><span id="vixLevel" class="metric-value">--</span></div>
+        <div class="metric"><span class="metric-label">黑天鵝指數 (SKEW)</span><span id="skewLevel" class="metric-value">--</span></div>
+      </div>
+    </div>
+    <div id="chartSection" style="display:none;">
+      <div class="card chart-container">
+        <h2 class="card-title">📈 QQQ 價格 vs 200日均線 (近一年)</h2>
+        <canvas id="priceChart"></canvas>
+      </div>
+    </div>
+  </div>
 
 <script>
     // ====== 設定 ======
     const FINNHUB_KEY = 'd2fb4b9r01qj3egs3910d2fb4b9r01qj3egs391g'; // 您的個人 Finnhub Key (報價)
     const FH_BASE = 'https://finnhub.io/api/v1';
 
-    // 您的個人 Alpha Vantage Key (日線) - 請務必換成您自己的
+    // 您的個人 Alpha Vantage Key (日線) - 請務必換成您自己的!!
     const ALPHA_VANTAGE_KEY = 'YOUR_ALPHA_VANTAGE_KEY'; 
     const AV_BASE = 'https://www.alphavantage.co/query';
 
     // ====== 智能快取機制 ======
-    const LS_PREFIX = 'tqqq_lrs_final_';
+    const LS_PREFIX = 'tqqq_lrs_final_v2_';
     function cacheGet(key) { try { const r = localStorage.getItem(LS_PREFIX + key); if (!r) return null; const i = JSON.parse(r); if (Date.now() > i.expiry) { localStorage.removeItem(LS_PREFIX + key); return null; } return i.value; } catch (e) { return null; } }
     function cacheSet(key, value, ttlMs) { const i = { value: value, expiry: Date.now() + ttlMs }; localStorage.setItem(LS_PREFIX + key, JSON.stringify(i)); }
-    async function fetchJSON(url, cacheKey, ttlMs) { if (cacheKey) { const d = cacheGet(cacheKey); if (d) { console.log(`[Cache] Hit for ${cacheKey}`); return d; } } console.log(`[API] Fetching ${cacheKey || url}`); const r = await fetch(url); if (!r.ok) { const errText = await r.text(); throw new Error(`HTTP Error: ${r.status} for ${url}. Details: ${errText}`); } const j = await r.json(); if (j.Note || j["Error Message"]) { throw new Error(j.Note || j["Error Message"]); } if (j.s === 'no_data') throw new Error(`No data for ${url}`); if (cacheKey && ttlMs) cacheSet(cacheKey, j, ttlMs); return j; }
+    async function fetchJSON(url, cacheKey, ttlMs) { if (cacheKey) { const d = cacheGet(cacheKey); if (d) { console.log(`[Cache] Hit for ${cacheKey}`); return d; } } console.log(`[API] Fetching ${cacheKey || url}`); const r = await fetch(url); if (!r.ok) { const errText = await r.text(); throw new Error(`HTTP Error: ${r.status} for ${url}. Details: ${errText}`); } const j = await r.json(); if (j.Note || j["Error Message"]) { throw new Error(`API限制或錯誤: ${j.Note || j["Error Message"]}`); } if (j.s === 'no_data') throw new Error(`No data for ${url}`); if (cacheKey && ttlMs) cacheSet(cacheKey, j, ttlMs); return j; }
 
     // ====== 指標計算函式 ======
     function computeSMA(arr, win) { if (!arr || arr.length < win) return null; return arr.slice(-win).reduce((a, b) => a + b, 0) / win; }
-    function computeRSI(arr, p = 14) { if (!arr || arr.length <= p) return null; let g = 0, l = 0; for (let i = arr.length - p; i < arr.length; i++) { const d = arr[i] - arr[i - 1]; if (d >= 0) g += d; else l -= d; } const rs = l === 0 ? Infinity : g / l; return 100 - (100 / (1 + rs)); }
-    function computeVol(arr, look = 20) { if (!arr || arr.length < look + 1) return null; const seg = arr.slice(-look - 1); const rets = []; for (let i = 1; i < seg.length; i++) rets.push((seg[i] - seg[i - 1]) / seg[i - 1]); const m = rets.reduce((a, b) => a + b, 0) / rets.length; const v = rets.reduce((a, b) => a + Math.pow(b - m, 2), 0) / (rets.length - 1); return Math.sqrt(v) * Math.sqrt(252) * 100; }
+    function computeRSI(arr, p = 14) { if (!arr || arr.length <= p) return null; let g = 0, l = 0; for (let i = arr.length - p; i < arr.length; i++) { const d = arr[i] - arr[i - 1]; if (d >= 0) g += d; else l -= d; } const avgGain = g / p; const avgLoss = l / p; if (avgLoss === 0) return 100; const rs = avgGain / avgLoss; return 100 - (100 / (1 + rs)); }
+    function computeVol(arr, look = 20) { if (!arr || arr.length < look + 1) return null; const seg = arr.slice(-look - 1); const rets = []; for (let i = 1; i < seg.length; i++) rets.push(Math.log(seg[i] / seg[i-1])); const m = rets.reduce((a, b) => a + b, 0) / rets.length; const v = rets.reduce((a, b) => a + Math.pow(b - m, 2), 0) / (rets.length - 1); return Math.sqrt(v) * Math.sqrt(252) * 100; }
 
     // ====== 數據獲取函式 ======
     async function getQuote(symbol) { // 使用 Finnhub
         const url = `${FH_BASE}/quote?symbol=${symbol}&token=${FINNHUB_KEY}`;
-        return await fetchJSON(url);
+        return await fetchJSON(url, `quote_${symbol}`, 60*1000); // 快取 1 分鐘
     }
     async function getDailyCandles(symbol, days = 300) { // 使用 Alpha Vantage
         const url = `${AV_BASE}?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=full&apikey=${ALPHA_VANTAGE_KEY}`;
-        const TTL = 23 * 60 * 60 * 1000;
+        const TTL = 23 * 60 * 60 * 1000; // 快取 23 小時
         const data = await fetchJSON(url, `candle_av_${symbol}`, TTL);
         const timeSeries = data['Time Series (Daily)'];
-        if (!timeSeries) throw new Error('No daily candle data from Alpha Vantage for ' + symbol);
+        if (!timeSeries) throw new Error('無法從 Alpha Vantage 獲取日線數據 ' + symbol);
         const dates = Object.keys(timeSeries).sort();
         const closes = dates.map(date => parseFloat(timeSeries[date]['4. close']));
         return { dates: dates.slice(-days), closes: closes.slice(-days) };
@@ -55,17 +100,17 @@
         try {
             document.getElementById('loadingIndicator').style.display = 'block';
             document.getElementById('errorAlert').style.display = 'none';
-            const [quoteQQQ, quoteTQQQ, quoteVIXY, candlesQQQ, candlesTQQQ] = await Promise.all([
-                getQuote('QQQ'), getQuote('TQQQ'), getQuote('VIXY'),
+            const [quoteQQQ, quoteTQQQ, quoteVIX, quoteSKEW, candlesQQQ, candlesTQQQ] = await Promise.all([
+                getQuote('QQQ'), getQuote('TQQQ'), getQuote('^VIX'), getQuote('^SKEW'),
                 getDailyCandles('QQQ', 300), getDailyCandles('TQQQ', 300)
             ]);
-            buildDashboard({ QQQ: quoteQQQ, TQQQ: quoteTQQQ, VIXY: quoteVIXY }, { candlesQQQ, candlesTQQQ });
-            setInterval(updateLiveQuotes, 60 * 1000);
+            buildDashboard({ QQQ: quoteQQQ, TQQQ: quoteTQQQ, VIX: quoteVIX, SKEW: quoteSKEW }, { candlesQQQ, candlesTQQQ });
+            setInterval(updateLiveQuotes, 60 * 1000); // 每分鐘更新即時報價
         } catch (err) {
-            console.error("Failed to build dashboard:", err);
+            console.error("儀表板建立失敗:", err);
             document.getElementById('loadingIndicator').style.display = 'none';
             document.getElementById('errorAlert').style.display = 'block';
-            document.getElementById('errorAlert').textContent = `⚠️ 載入數據失敗: ${err.message}`;
+            document.getElementById('errorAlert').textContent = `⚠️ 載入數據失敗: ${err.message}. 請檢查您的 API 金鑰或網路連線。`;
         }
     }
     
@@ -77,12 +122,19 @@
         updateMetrics(quotes.QQQ, quotes.TQQQ);
         document.getElementById('tqqqVolatility').textContent = tqqqVol ? tqqqVol.toFixed(1) + '%' : '--';
         document.getElementById('tqqqRsi').textContent = tqqqRsi ? tqqqRsi.toFixed(0) : '--';
-        document.getElementById('vixLevel').textContent = quotes.VIXY && quotes.VIXY.c ? quotes.VIXY.c.toFixed(2) : '--';
+        document.getElementById('vixLevel').textContent = quotes.VIX && quotes.VIX.c ? quotes.VIX.c.toFixed(2) : '--';
+        document.getElementById('skewLevel').textContent = quotes.SKEW && quotes.SKEW.c ? quotes.SKEW.c.toFixed(2) : '--';
         document.getElementById('qqqSma200').textContent = qqqSma200 ? '$' + qqqSma200.toFixed(2) : '--';
 
-        // 首次更新策略信號
         if (qqqSma200) {
-            updateStrategySignal(quotes.QQQ.c, qqqSma200);
+            const distance = ((quotes.QQQ.c - qqqSma200) / qqqSma200 * 100);
+            updateStrategySignal(quotes.QQQ.c, qqqSma200, distance);
+            updateMarketHeat({
+                qqqDistance: distance,
+                tqqqRsi: tqqqRsi,
+                vixLevel: quotes.VIX ? quotes.VIX.c : null,
+                skewLevel: quotes.SKEW ? quotes.SKEW.c : null
+            });
         }
 
         const ctx = document.getElementById('priceChart').getContext('2d');
@@ -98,18 +150,29 @@
 
     async function updateLiveQuotes() {
         try {
-            const [quoteQQQ, quoteTQQQ, quoteVIXY] = await Promise.all([ getQuote('QQQ'), getQuote('TQQQ'), getQuote('VIXY') ]);
+            const [quoteQQQ, quoteTQQQ, quoteVIX, quoteSKEW] = await Promise.all([ getQuote('QQQ'), getQuote('TQQQ'), getQuote('^VIX'), getQuote('^SKEW') ]);
             updateMetrics(quoteQQQ, quoteTQQQ);
-            document.getElementById('vixLevel').textContent = quoteVIXY && quoteVIXY.c ? quoteVIXY.c.toFixed(2) : '--';
+            document.getElementById('vixLevel').textContent = quoteVIX && quoteVIX.c ? quoteVIX.c.toFixed(2) : '--';
+            document.getElementById('skewLevel').textContent = quoteSKEW && quoteSKEW.c ? quoteSKEW.c.toFixed(2) : '--';
             
             const smaText = document.getElementById('qqqSma200').textContent;
+            const rsiText = document.getElementById('tqqqRsi').textContent;
             if (smaText && smaText.startsWith('$')) {
                 const sma200 = parseFloat(smaText.replace('$', ''));
-                updateStrategySignal(quoteQQQ.c, sma200);
+                const distance = ((quoteQQQ.c - sma200) / sma200 * 100);
+                updateStrategySignal(quoteQQQ.c, sma200, distance);
+
+                const rsi = rsiText ? parseFloat(rsiText) : null;
+                 updateMarketHeat({
+                    qqqDistance: distance,
+                    tqqqRsi: rsi,
+                    vixLevel: quoteVIX ? quoteVIX.c : null,
+                    skewLevel: quoteSKEW ? quoteSKEW.c : null
+                });
             }
 
         } catch (e) {
-            console.warn("Could not update live quotes:", e.message);
+            console.warn("無法更新即時報價:", e.message);
             document.getElementById('lastUpdate').textContent = `報價更新失敗`;
         }
     }
@@ -132,11 +195,10 @@
         document.getElementById('tqqqChange').className = 'metric-value ' + (changeTQQQ >= 0 ? 'positive' : 'negative');
     }
 
-    function updateStrategySignal(currentPrice, sma200) {
+    function updateStrategySignal(currentPrice, sma200, distance) {
         if (currentPrice === null || isNaN(sma200)) return;
 
         const isAbove = currentPrice > sma200;
-        const distance = ((currentPrice - sma200) / sma200 * 100);
         document.getElementById('qqqDistance').textContent = distance.toFixed(2) + '%';
         
         const signalEl = document.getElementById('signalStatus');
@@ -159,8 +221,35 @@
         document.getElementById('lastUpdate').textContent = `更新於: ${new Date().toLocaleTimeString('zh-TW')}`;
     }
 
+    function updateMarketHeat(indicators) {
+        const { qqqDistance, tqqqRsi, vixLevel, skewLevel } = indicators;
+        const heatEl = document.getElementById('marketHeat');
+        
+        if (qqqDistance === null || tqqqRsi === null || vixLevel === null || skewLevel === null) {
+            heatEl.textContent = '--';
+            heatEl.className = 'metric-value';
+            return;
+        }
+
+        // 規則 1: 過熱 (紅色) - 極端乖離、高 RSI、市場極度自滿
+        if (qqqDistance > 15 && tqqqRsi > 70 && vixLevel < 15) {
+            heatEl.textContent = '過熱';
+            heatEl.className = 'metric-value negative';
+        } 
+        // 規則 2: 謹慎 (橘色) - 乖離偏高、RSI 偏高、或 SKEW 異常高
+        else if (qqqDistance > 10 || tqqqRsi > 65 || skewLevel > 140) {
+            heatEl.textContent = '謹慎';
+            heatEl.className = 'metric-value neutral';
+        }
+        // 規則 3: 正常 (綠色)
+        else {
+            heatEl.textContent = '正常';
+            heatEl.className = 'metric-value positive';
+        }
+    }
+
     function refreshData() {
-        console.log("Forcing refresh, clearing candle cache...");
+        console.log("強制更新，清除日線快取...");
         localStorage.removeItem(LS_PREFIX + 'candle_av_QQQ');
         localStorage.removeItem(LS_PREFIX + 'candle_av_TQQQ');
         initialLoad();
